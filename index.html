@@ -59,6 +59,17 @@ nav button.on{color:var(--accent);font-weight:600}
 .note .ch{color:var(--accent);font-weight:600}
 .note .sec{color:var(--warm);font-weight:600}
 .shot{width:100%;border-radius:10px;display:block;border:1px solid var(--line);margin-bottom:7px}
+.zoomwrap{overflow:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--card);margin-bottom:7px;max-height:78vh}
+.zoomwrap img{display:block;width:100%;height:auto;cursor:zoom-in}
+#viewer{position:fixed;inset:0;z-index:80;background:#101015;display:flex;flex-direction:column}
+#viewer .vbar{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top) + 10px) 14px 8px}
+#viewer .vname{color:#ddd;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#viewer .vscroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;background:#fff}
+#viewer .vscroll img{display:block;width:100%;height:auto}
+#viewer .vzoom{padding:8px 14px calc(env(safe-area-inset-bottom) + 10px)}
+#viewer .speed button{background:#23242E;border-color:#3A3B47;color:#ddd}
+#viewer .speed button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+#viewer .chip{background:#23242E;border-color:#3A3B47;color:#eee}
 .cap{font-size:12.5px;color:var(--soft);margin:-2px 0 12px;display:flex;gap:10px;align-items:center}
 .cap b{font-weight:500;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 audio,video{width:100%;border-radius:10px;margin-bottom:5px}
@@ -148,14 +159,16 @@ const toast=m=>{const t=document.getElementById('toast');t.textContent=m;t.class
 /* ================= files ================= */
 const MAXB=(HOSTED?200:4.4)*1024*1024, tooBig=d=>d.length*0.75>MAXB;
 const readFile=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('Could not read that file'));r.readAsDataURL(f);});
-function shrink(file,max=1600,q=0.78){return new Promise(async(res,rej)=>{try{
+function shrink(file,max,q=0.82){return new Promise(async(res,rej)=>{try{
+  max=max||(HOSTED?2400:1600);
   const url=await readFile(file),img=new Image();
   img.onload=()=>{const sc=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');
     c.width=Math.round(img.width*sc);c.height=Math.round(img.height*sc);
     c.getContext('2d').drawImage(img,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',q));};
   img.onerror=()=>rej(new Error('Could not open that picture'));img.src=url;}catch(e){rej(e);}});}
 const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
-async function pdfPages(file,scale=1.6){
+async function pdfPages(file,scale){
+  scale=scale||(HOSTED?2.6:1.9);
   if(!window.pdfjsLib){await new Promise((res,rej)=>{const s=document.createElement('script');s.src=PDFJS+'pdf.min.js';
     s.onload=res;s.onerror=()=>rej(new Error('Could not load the PDF reader. Check your connection.'));document.head.appendChild(s);});
     window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS+'pdf.worker.min.js';}
@@ -426,11 +439,54 @@ function addPics(s,label){
     await saveOwner();toast('Added');repaint();};
   return l;
 }
+function zoomRow(img,wrap){
+  const row=document.createElement('div');row.className='speed';
+  const apply=(mode,btn)=>{
+    if(mode==='fit'){img.style.width='100%';}
+    else{const w=img.naturalWidth||1200;img.style.width=Math.round(w*mode)+'px';}
+    wrap.scrollLeft=0;
+    row.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+    btn.classList.add('on');
+  };
+  [['Fit','fit'],['50%',0.5],['75%',0.75],['100%',1]].forEach(([label,mode],i)=>{
+    const b=document.createElement('button');b.textContent=label;if(i===0)b.className='on';
+    b.onclick=()=>apply(mode,b);row.appendChild(b);
+  });
+  const full=document.createElement('button');full.textContent='Full screen';
+  full.onclick=()=>openViewer(img.src,img.alt);row.appendChild(full);
+  return row;
+}
+function openViewer(src,name){
+  const v=document.createElement('div');v.id='viewer';
+  v.innerHTML=`<div class="vbar"><button class="chip" id="vclose">Close</button><span class="vname">${esc(name||'')}</span></div>
+    <div class="vscroll"><img src="${src}" alt="${esc(name||'')}"></div>
+    <div class="vzoom"></div>`;
+  document.body.appendChild(v);
+  const img=v.querySelector('img'),scroll=v.querySelector('.vscroll');
+  v.querySelector('.vzoom').appendChild(zoomRowFor(img,scroll));
+  v.querySelector('#vclose').onclick=()=>v.remove();
+}
+function zoomRowFor(img,wrap){
+  const row=document.createElement('div');row.className='speed';row.style.justifyContent='center';
+  [['Fit','fit'],['100%',1],['150%',1.5],['200%',2]].forEach(([label,mode],i)=>{
+    const b=document.createElement('button');b.textContent=label;if(i===0)b.className='on';
+    b.onclick=()=>{ if(mode==='fit')img.style.width='100%';
+      else img.style.width=Math.round((img.naturalWidth||1200)*mode)+'px';
+      row.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');};
+    row.appendChild(b);
+  });
+  return row;
+}
 async function drawPics(body,s,before){
   for(const it of s.items.filter(i=>i.kind==='picture')){
     const b=await getBlob(it.id);if(!b)continue;
-    const im=new Image();im.className='shot';im.src=b.data;im.alt=it.name;
-    body.insertBefore(im,before||null);body.insertBefore(capFor(it,s),before||null);
+    const wrap=document.createElement('div');wrap.className='zoomwrap';
+    const im=new Image();im.src=b.data;im.alt=it.name;
+    im.onclick=()=>openViewer(b.data,it.name);
+    wrap.appendChild(im);
+    body.insertBefore(wrap,before||null);
+    body.insertBefore(zoomRow(im,wrap),before||null);
+    body.insertBefore(capFor(it,s),before||null);
   }
 }
 /* notes — words, pictures, and a transpose control when chords are found */
@@ -571,15 +627,19 @@ function viewTools(bpmOpen){
         .map(([k,l])=>`<button class="chip ${theme===k?'on':''}" data-th="${k}">${l}</button>`).join('')}</div>
     </section>
     <section class="card"><div class="chead"><h3 style="cursor:default">Backup</h3></div>
-      <p class="hint" style="margin:0 0 12px">Saves your song list, headings, words and video links as a file. Pictures and recordings stay on this device.</p>
-      <div class="btns"><button class="btn ghost small" id="ex">Save a backup</button>
-        <label class="file btn ghost small">Restore a backup<input type="file" accept="application/json" id="im"></label></div>
+      <p class="hint" style="margin:0 0 12px"><b>Everything</b> includes your pages, photos and recordings, so it can rebuild the whole app on another phone. It is a large file — save it to Files or iCloud Drive, not email. <b>Words only</b> is small: songs, headings, typed notes and video links.</p>
+      <div class="btns"><button class="btn ghost small" id="exf">Back up everything</button>
+        <button class="btn ghost small" id="exw">Words only</button>
+        <label class="file btn ghost small">Restore<input type="file" accept="application/json" id="im"></label></div>
+      <p class="hint" id="space"></p>
     </section>`;
   main.querySelectorAll('[data-th]').forEach(b=>b.onclick=async()=>{
     theme=b.dataset.th;document.body.dataset.theme=theme;await S.set('theme',theme);viewTools();});
   wireTuner();wireMetronome();
-  document.getElementById('ex').onclick=doExport;
+  document.getElementById('exf').onclick=()=>doExport(true);
+  document.getElementById('exw').onclick=()=>doExport(false);
   document.getElementById('im').onchange=doImport;
+  showSpace();
 }
 /* --- tuner: listens and works out the pitch --- */
 let actx=null,tuning=false,tstream=null;
@@ -669,24 +729,58 @@ function wireMetronome(){
   };
 }
 /* --- backup --- */
-async function doExport(){
-  const out={made:new Date().toISOString(),index,songs:[],books:{}};
-  for(const r of index){const s=await S.get('song:'+r.id);if(s)out.songs.push(s);}
-  for(const k of Object.keys(BOOKS)){const b=await S.get('book:'+k);if(b)out.books[k]=b;}
+async function doExport(full){
+  toast(full?'Packing everything…':'Packing…');
+  const parts=['{"v":2,"made":'+JSON.stringify(new Date().toISOString())+',"index":'+JSON.stringify(index)+',"songs":['];
+  const ids=[]; let first=true;
+  for(const r of index){
+    const s=await S.get('song:'+r.id); if(!s) continue;
+    parts.push((first?'':',')+JSON.stringify(s)); first=false;
+    s.sections.forEach(sec=>sec.items.forEach(it=>ids.push(it.id)));
+  }
+  parts.push('],"books":{'); first=true;
+  for(const k of Object.keys(BOOKS)){
+    const b=await S.get('book:'+k); if(!b) continue;
+    parts.push((first?'':',')+JSON.stringify(k)+':'+JSON.stringify(b)); first=false;
+    b.sections.forEach(sec=>sec.items.forEach(it=>ids.push(it.id)));
+  }
+  parts.push('},"blobs":{');
+  if(full){
+    first=true;
+    for(const id of ids){
+      const b=await getBlob(id); if(!b) continue;
+      parts.push((first?'':',')+JSON.stringify(id)+':'+JSON.stringify(b.data)); first=false;
+    }
+  }
+  parts.push('}}');
+  const blob=new Blob(parts,{type:'application/json'});
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,1)],{type:'application/json'}));
-  a.download='riyaz-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();
-  toast('Backup saved');
+  a.href=URL.createObjectURL(blob);
+  a.download='riyaz-'+(full?'full-':'words-')+new Date().toISOString().slice(0,10)+'.json';
+  a.click();
+  toast('Backup saved · '+(blob.size/1048576).toFixed(1)+' MB');
 }
 async function doImport(e){
-  const f=e.target.files[0];if(!f)return;
+  const f=e.target.files[0]; if(!f) return;
+  toast('Restoring…');
   try{
     const data=JSON.parse(await f.text());
-    if(!data.songs)throw new Error('That is not a Riyaz backup');
+    if(!data.songs) throw new Error('That is not a Riyaz backup');
+    let pics=0;
+    for(const [id,d] of Object.entries(data.blobs||{})){ await putBlob(id,d); pics++; }
     for(const s of data.songs){ if(!index.find(r=>r.id===s.id)) await saveSong(s); }
     for(const k of Object.keys(data.books||{})) await S.set('book:'+k,data.books[k]);
-    await loadIndex();toast('Restored '+data.songs.length+' songs');
-  }catch(err){toast(err.message||'Could not read that backup');}
+    await loadIndex();
+    toast('Restored '+data.songs.length+' songs'+(pics?' and '+pics+' files':''));
+    viewSongs();
+  }catch(err){ toast(err.message||'Could not read that backup'); }
+}
+async function showSpace(){
+  const el=document.getElementById('space'); if(!el) return;
+  try{
+    const est=await navigator.storage.estimate();
+    if(est&&est.usage!=null) el.textContent='Using '+(est.usage/1048576).toFixed(0)+' MB on this device.';
+  }catch(e){}
 }
 
 /* ================= go ================= */
