@@ -875,6 +875,39 @@ function footer(body,s,own,buttons){
     own.sections=own.sections.filter(x=>x.id!==s.id);await saveOwner();toast('Section removed');repaint();};
   bar.appendChild(del);body.appendChild(bar);
 }
+/* reports what is really stored, so a silent clip can be diagnosed */
+async function checkMedia(it){
+  const b=await getBlob(it.id);
+  if(!b){ alert('Nothing is stored for this item.'); return; }
+  const raw=b.data;
+  const asFile=typeof raw!=='string';
+  const size=asFile?raw.size:Math.round(raw.length*0.75);
+  const type=asFile?(raw.type||'unknown'):((raw.match(/^data:([^;]+)/)||[])[1]||'unknown');
+  const el=document.createElement(it.kind==='audio'?'audio':'video');
+  el.preload='metadata'; el.muted=false; el.src=mediaURL(it.id,raw);
+  const info=await new Promise(res=>{
+    let done=false;
+    const finish=o=>{if(!done){done=true;res(o);}};
+    el.addEventListener('loadedmetadata',()=>{
+      let audio='cannot tell on this browser';
+      if(el.audioTracks) audio=el.audioTracks.length?'yes ('+el.audioTracks.length+')':'NO AUDIO TRACK';
+      else if(typeof el.mozHasAudio==='boolean') audio=el.mozHasAudio?'yes':'NO AUDIO TRACK';
+      finish({dur:el.duration,audio});
+    });
+    el.addEventListener('error',()=>finish({dur:null,audio:'file will not open — it is damaged'}));
+    setTimeout(()=>finish({dur:null,audio:'timed out reading the file'}),6000);
+  });
+  const dur=info.dur&&isFinite(info.dur)
+    ? Math.floor(info.dur/60)+'m '+Math.round(info.dur%60)+'s'
+    : 'unknown — usually means the file was cut short';
+  alert('“'+(it.name||'untitled')+'”\n\n'
+    +'Stored as: '+(asFile?'real file (good)':'text (old style)')+'\n'
+    +'Size: '+(size/1048576).toFixed(1)+' MB\n'
+    +'Type: '+type+'\n'
+    +'Length: '+dur+'\n'
+    +'Audio track: '+info.audio+'\n\n'
+    +(asFile?'':'Stored the old way — delete it and upload again to fix sound.'));
+}
 function capFor(it,s){
   const cap=document.createElement('div');cap.className='cap';cap.innerHTML=`<b>${esc(it.name)}</b>`;
   const rn=document.createElement('button');rn.className='link';rn.textContent='Rename';
@@ -882,7 +915,12 @@ function capFor(it,s){
   const dl=document.createElement('button');dl.className='link danger';dl.textContent='Delete';
   dl.onclick=async()=>{if(!confirm('Delete “'+it.name+'”?'))return;
     s.items=s.items.filter(x=>x.id!==it.id);await S.del('blob:'+it.id);await saveOwner();repaint();};
-  cap.append(rn,dl);return cap;
+  cap.append(rn);
+  if(it.kind==='clip'||it.kind==='audio'){
+    const ck=document.createElement('button');ck.className='link';ck.textContent='check';
+    ck.onclick=()=>checkMedia(it); cap.appendChild(ck);
+  }
+  cap.appendChild(dl);return cap;
 }
 function cameraBtn(s){
   const l=document.createElement('label');l.className='file btn ghost small';
@@ -1013,6 +1051,7 @@ function popOut(o){
   if(o.kind==='el'){
     const el=document.createElement(o.audio?'audio':'video');
     el.src=o.src;el.controls=true;el.playsInline=true;el.preload='metadata';
+    el.muted=false;el.volume=1;
     if(o.audio) body.classList.add('audio');
     body.appendChild(el);
     el.addEventListener('loadedmetadata',()=>{el.currentTime=o.time||0;el.playbackRate=o.rate||1;
@@ -1223,6 +1262,7 @@ function secVids(body,s,own){
 }
 let nowPlaying=null, lastYT=null;
 function speeds(el){
+  el.muted=false; el.removeAttribute('muted'); el.volume=1;
   const sp=document.createElement('div');sp.className='speed';
   let want=1, repeat=false, fixing=false;
   const stick=()=>{                     /* iOS resets the rate on load, play and full screen */
