@@ -1700,6 +1700,22 @@ async function showSpace(){
   }catch(e){}
 }
 
+/* ================= keep the screen awake while the app is open ================= */
+/* A singer's hands are busy: the screen must not dim mid-song. The browser drops the
+   lock whenever the page is hidden, so we ask for it again each time we come back. */
+let wakeLock=null;
+async function keepAwake(){
+  if(!('wakeLock' in navigator)||document.visibilityState!=='visible'||wakeLock) return;
+  try{
+    wakeLock=await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release',()=>{wakeLock=null;});
+  }catch(e){ wakeLock=null; }   /* low battery or not allowed: carry on quietly */
+}
+document.addEventListener('visibilitychange',keepAwake);
+/* some browsers only grant the lock after a tap, so retry on the first touch too */
+['pointerdown','keydown'].forEach(ev=>document.addEventListener(ev,keepAwake,{passive:true}));
+keepAwake();
+
 /* ================= go ================= */
 (async function(){
   theme=(await S.get('theme'))||'dusk';document.body.dataset.theme=theme;
